@@ -29,6 +29,7 @@ var(
   pattern pat
   only_find_file bool
   absolute_path *bool
+  num_parallel *int
 )
 
 func walk(dir string) ([]string, error) {
@@ -61,8 +62,9 @@ func walk(dir string) ([]string, error) {
   return path, err
 }
 
-func exec(f string, wg *sync.WaitGroup, r *regexp.Regexp) {
+func exec(f string, wg *sync.WaitGroup, r *regexp.Regexp, sph chan int) {
   defer wg.Done()
+  sph <- 1
   p, e := filepath.Abs(f)
   if !*absolute_path {
     p = f
@@ -86,20 +88,22 @@ func exec(f string, wg *sync.WaitGroup, r *regexp.Regexp) {
   for ; err == nil; l, err = b.ReadBytes('\n') {
     if r != nil && r.Match(l) {
       if *show_only_file_status {
-        fmt.Printf("[%s:%d]\n", p, i)
+        fmt.Printf("%s:%d\n", p, i)
       } else {
         fmt.Printf("[%s:%d]%s", p, i, l)
       }
     }
     i++
   }
+  <- sph
 }
 
 func search(files []string, r *regexp.Regexp) {
   w := new(sync.WaitGroup)
+  sph := make(chan int, *num_parallel)
   for _, file := range files {
     w.Add(1)
-    go exec(file, w, r)
+    go exec(file, w, r, sph)
   }
   w.Wait()
 }
@@ -109,6 +113,7 @@ func main() {
   only_find_file = false
   buffer_size = flag.Int("b", 4096, "buffer size of each lines")
   show_only_file_status = flag.Bool("s", false, "show only file status(this will be ignored if set -f and not set -r)")
+  num_parallel = flag.Int("n", 1000, "max number which able to run as parallel")
   absolute_path = flag.Bool("a", false, "show path as absolute. default is relative")
   dir := flag.String("p", ".", "root path to start searching")
   r := flag.String("r", "", "regex for each lines")
