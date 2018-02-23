@@ -9,6 +9,7 @@ import (
   "flag"
   "fmt"
   "sync"
+  "runtime"
 )
 
 type pat []string
@@ -60,47 +61,51 @@ func walk(dir string) ([]string, error) {
   return path, err
 }
 
+func exec(f string, wg *sync.WaitGroup, r *regexp.Regexp) {
+  defer wg.Done()
+  p, e := filepath.Abs(f)
+  if !*absolute_path {
+    p = f
+  }
+  if e != nil {
+    panic(e)
+  }
+  if r == nil {
+    fmt.Println(p)
+    return
+  }
+  fp, err := os.Open(f)
+  if err != nil {
+    fmt.Println(err)
+    return
+  }
+  defer fp.Close()
+  b := bufio.NewReaderSize(fp, *buffer_size)
+  var i int
+  var l []byte
+  for ; err == nil; l, err = b.ReadBytes('\n') {
+    if r != nil && r.Match(l) {
+      if *show_only_file_status {
+        fmt.Printf("[%s:%d]\n", p, i)
+      } else {
+        fmt.Printf("[%s:%d]%s", p, i, l)
+      }
+    }
+    i++
+  }
+}
+
 func search(files []string, r *regexp.Regexp) {
   w := new(sync.WaitGroup)
   for _, file := range files {
     w.Add(1)
-    go func(f string, wg *sync.WaitGroup) {
-      defer wg.Done()
-      fp, err := os.Open(f)
-      if err != nil {
-        fmt.Println(err)
-        return
-      }
-      defer fp.Close()
-      b := bufio.NewReaderSize(fp, *buffer_size)
-      var i int
-      var l []byte
-      for ; err == nil; l, err = b.ReadBytes('\n') {
-        p, e := filepath.Abs(f)
-        if !*absolute_path {
-          p = f
-        }
-        if e != nil {
-          panic(e)
-        }
-        if r != nil && r.Match(l) {
-          if *show_only_file_status {
-            fmt.Printf("[%s:%d]\n", p, i)
-          } else {
-            fmt.Printf("[%s:%d]%s", p, i, l)
-          }
-        } else if r == nil {
-          fmt.Println(p)
-          break
-        }
-        i++
-      }
-    }(file, w)
+    go exec(file, w, r)
   }
   w.Wait()
 }
 
 func main() {
+  runtime.GOMAXPROCS(runtime.NumCPU())
   only_find_file = false
   buffer_size = flag.Int("b", 4096, "buffer size of each lines")
   show_only_file_status = flag.Bool("s", false, "show only file status(this will be ignored if set -f and not set -r)")
